@@ -184,13 +184,13 @@ export default function SettingsPage() {
             <div>
               <label className="block text-xs font-semibold text-primaryText mb-1 flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-secondaryText" />
-                <span>Supabase Anon / Public API Key</span>
+                <span>Supabase Anon / Publishable API Key</span>
               </label>
               <input
                 type="password"
                 value={dbKey}
                 onChange={e => setDbKey(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                placeholder="sb_publishable_... or eyJhbGci..."
                 className="w-full px-3 py-2 text-xs bg-background rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-primaryAccent/30 font-mono"
                 required
               />
