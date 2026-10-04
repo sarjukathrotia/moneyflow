@@ -24,8 +24,14 @@ export default function RootLayout({
           name="description"
           content="Simple, beautiful digital personal money diary and financial dashboard for desktop and mobile."
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="theme-color" content="#2563EB" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="MoneyFlow" />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body className="bg-background text-primaryText antialiased">
         <MoneyFlowProvider>
