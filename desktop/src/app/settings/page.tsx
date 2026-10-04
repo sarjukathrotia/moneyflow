@@ -18,6 +18,16 @@ import {
   Check,
   AlertCircle,
   Unlink,
+  Terminal,
+  Bug,
+  Activity,
+  FileText,
+  Play,
+  Trash2,
+  RefreshCw,
+  Search,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { useMoneyFlow } from '../../lib/store';
 
@@ -37,12 +47,73 @@ export default function SettingsPage() {
     supabaseAnonKey,
     connectSupabase,
     disconnectSupabase,
+    debugLogs,
+    clearLogs,
+    runDiagnosticTest,
   } = useMoneyFlow();
 
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [appLockEnabled, setAppLockEnabled] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(true);
   const [autoLockDuration, setAutoLockDuration] = useState('5 minutes');
+
+  // Debug Log State
+  const [logFilter, setLogFilter] = useState<'ALL' | 'DATABASE' | 'SYNC' | 'TRANSACTION' | 'SYSTEM' | 'ERROR'>('ALL');
+  const [logSearch, setLogSearch] = useState('');
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+  const filteredLogs = debugLogs.filter(log => {
+    if (logFilter === 'ERROR' && log.level !== 'ERROR') return false;
+    if (logFilter !== 'ALL' && logFilter !== 'ERROR' && log.category !== logFilter) return false;
+    if (logSearch.trim()) {
+      const q = logSearch.toLowerCase();
+      const matchMsg = log.message.toLowerCase().includes(q);
+      const matchCat = log.category.toLowerCase().includes(q);
+      const matchData = log.data ? JSON.stringify(log.data).toLowerCase().includes(q) : false;
+      return matchMsg || matchCat || matchData;
+    }
+    return true;
+  });
+
+  const handleCopyLogs = () => {
+    const formatted = debugLogs
+      .map(
+        l =>
+          `[${l.timestamp}] [${l.level}] [${l.category}] ${l.message}${
+            l.data ? '\nPayload: ' + JSON.stringify(l.data, null, 2) : ''
+          }`
+      )
+      .join('\n\n');
+    navigator.clipboard.writeText(formatted);
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2500);
+  };
+
+  const handleDownloadLogs = () => {
+    const formatted = debugLogs
+      .map(
+        l =>
+          `[${l.timestamp}] [${l.level}] [${l.category}] ${l.message}${
+            l.data ? '\nPayload: ' + JSON.stringify(l.data, null, 2) : ''
+          }`
+      )
+      .join('\n\n');
+    const blob = new Blob([formatted], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `moneyflow-debug-log-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRunDiagnostics = async () => {
+    setIsRunningDiagnostics(true);
+    await runDiagnosticTest();
+    setIsRunningDiagnostics(false);
+  };
 
   // Supabase Database Form State
   const [dbUrl, setDbUrl] = useState(supabaseUrl || '');
@@ -446,6 +517,188 @@ export default function SettingsPage() {
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset to Clean State</span>
           </button>
+        </div>
+      </div>
+
+      {/* 6. Developer Diagnostics & Debug Logs */}
+      <div className="p-6 bg-surface rounded-card border border-border shadow-card space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-primaryText flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-primaryAccent" />
+              <span>Debug Logs & System Diagnostics</span>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                syncStatus === 'SYNCED'
+                  ? 'bg-positive-light text-positive border border-green-200'
+                  : syncStatus === 'SYNCING'
+                  ? 'bg-blue-50 text-primaryAccent border border-blue-200'
+                  : 'bg-gray-100 text-secondaryText border border-gray-200'
+              }`}>
+                {debugLogs.length} events
+              </span>
+            </h2>
+            <p className="text-xs text-secondaryText">
+              Real-time operational event stream, database ping, network status, and sync telemetry.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRunDiagnostics}
+              disabled={isRunningDiagnostics}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primaryAccent hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-60 active:scale-95 cursor-pointer"
+              title="Test database ping latency and verify local storage"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRunningDiagnostics ? 'animate-spin' : ''}`} />
+              <span>{isRunningDiagnostics ? 'Testing...' : 'Run Diagnostics'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyLogs}
+              disabled={debugLogs.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-gray-100 text-primaryText border border-border rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50 active:scale-95 cursor-pointer"
+              title="Copy all logs to clipboard"
+            >
+              {copiedLogs ? <Check className="w-3.5 h-3.5 text-positive" /> : <Copy className="w-3.5 h-3.5 text-secondaryText" />}
+              <span>{copiedLogs ? 'Copied' : 'Copy'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadLogs}
+              disabled={debugLogs.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-gray-100 text-primaryText border border-border rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50 active:scale-95 cursor-pointer"
+              title="Download logs as text file"
+            >
+              <Download className="w-3.5 h-3.5 text-secondaryText" />
+              <span>Export</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={clearLogs}
+              disabled={debugLogs.length === 0}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-secondaryText hover:text-negative hover:bg-red-50 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              title="Clear log buffer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Filter & Search Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {(['ALL', 'DATABASE', 'SYNC', 'TRANSACTION', 'SYSTEM', 'ERROR'] as const).map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setLogFilter(tab)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                  logFilter === tab
+                    ? 'bg-primaryText text-surface shadow-xs'
+                    : 'bg-background hover:bg-gray-200/70 text-secondaryText'
+                }`}
+              >
+                {tab === 'ALL' ? 'All' : tab.charAt(0) + tab.slice(1).toLowerCase()}
+                {tab === 'ERROR' && (
+                  <span className="ml-1 text-[10px] text-negative font-bold">
+                    ({debugLogs.filter(l => l.level === 'ERROR').length})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative w-full sm:w-56">
+            <Search className="w-3.5 h-3.5 text-secondaryText absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={logSearch}
+              onChange={e => setLogSearch(e.target.value)}
+              placeholder="Search logs..."
+              className="w-full pl-8 pr-3 py-1 text-xs bg-background rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primaryAccent font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Terminal Log Console */}
+        <div className="bg-[#0B0F19] text-gray-200 rounded-xl border border-gray-800 p-3 font-mono text-xs overflow-hidden shadow-inner">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-800/80 text-[11px] text-gray-400">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
+              <span className="ml-2 font-medium text-gray-400">Diagnostic Stream</span>
+            </div>
+            <span>{filteredLogs.length} / {debugLogs.length} events</span>
+          </div>
+
+          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1 select-text">
+            {filteredLogs.length === 0 ? (
+              <div className="py-8 text-center text-gray-500 text-xs">
+                <Terminal className="w-5 h-5 mx-auto mb-2 opacity-40" />
+                <p>No log events matching current filter.</p>
+                <button
+                  type="button"
+                  onClick={handleRunDiagnostics}
+                  className="mt-2 text-primaryAccent hover:underline text-[11px] cursor-pointer"
+                >
+                  Click here to run system diagnostics
+                </button>
+              </div>
+            ) : (
+              filteredLogs.map(log => {
+                const time = log.timestamp.split('T')[1]?.replace('Z', '') || log.timestamp;
+                const isExpanded = expandedLogId === log.id;
+                const hasData = Boolean(log.data);
+
+                const levelBadgeClass =
+                  log.level === 'SUCCESS'
+                    ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800'
+                    : log.level === 'ERROR'
+                    ? 'text-red-400 bg-red-950/60 border-red-800'
+                    : log.level === 'WARN'
+                    ? 'text-amber-300 bg-amber-950/60 border-amber-800'
+                    : 'text-sky-300 bg-sky-950/60 border-sky-800';
+
+                return (
+                  <div
+                    key={log.id}
+                    className="p-1.5 rounded hover:bg-gray-900/80 transition-colors border border-transparent hover:border-gray-800"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-gray-500 text-[10px] shrink-0 mt-0.5">{time.slice(0, 12)}</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border shrink-0 ${levelBadgeClass}`}>
+                        {log.level}
+                      </span>
+                      <span className="text-[10px] font-semibold text-gray-400 shrink-0">
+                        [{log.category}]
+                      </span>
+                      <span className="flex-1 break-words text-gray-200 text-xs">{log.message}</span>
+                      {hasData && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                          className="text-[10px] text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-800/80 hover:bg-gray-700 shrink-0 flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{isExpanded ? 'Hide' : 'Inspect'}</span>
+                          {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                    {isExpanded && log.data && (
+                      <pre className="mt-2 p-2 rounded bg-black/60 border border-gray-800 text-[11px] text-emerald-300 overflow-x-auto whitespace-pre-wrap">
+                        {JSON.stringify(log.data, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </div>

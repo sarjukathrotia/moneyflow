@@ -113,3 +113,16 @@ export interface BalanceTrendPoint {
   income: number;
   expense: number;
 }
+
+export type LogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
+export type LogCategory = 'DATABASE' | 'SYNC' | 'TRANSACTION' | 'ACCOUNT' | 'SYSTEM';
+
+export interface DebugLogEntry {
+  id: string;
+  timestamp: string;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  data?: any;
+}
+

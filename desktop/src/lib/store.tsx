@@ -10,6 +10,9 @@ import {
   Transfer,
   BalanceTrendPoint,
   CategorySpending,
+  DebugLogEntry,
+  LogLevel,
+  LogCategory,
 } from '../types/moneyflow';
 import {
   calculateAccountBalances,
@@ -80,9 +83,36 @@ interface MoneyFlowContextType {
   exportData: (format: 'json' | 'csv') => void;
   importBackup: (jsonContent: string) => boolean;
   resetToDefaults: () => void;
+
+  // Debug & Diagnostics
+  debugLogs: DebugLogEntry[];
+  addLog: (level: LogLevel, category: LogCategory, message: string, data?: any) => void;
+  clearLogs: () => void;
+  runDiagnosticTest: () => Promise<void>;
 }
 
 const STORAGE_KEY = 'moneyflow_state_clean_v1';
+const LOGS_STORAGE_KEY = 'moneyflow_debug_logs_v1';
+
+const getInitialLogs = (): DebugLogEntry[] => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem(LOGS_STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {}
+  }
+  return [
+    {
+      id: 'init-1',
+      timestamp: new Date().toISOString(),
+      level: 'INFO',
+      category: 'SYSTEM',
+      message: 'MoneyFlow core runtime initialized',
+    },
+  ];
+};
 
 const defaultProfile: Profile = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -138,6 +168,45 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => getActiveSupabaseClient().anonKey);
   const isLive = Boolean(supabaseClient);
 
+  // Debug Logs State
+  const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>(getInitialLogs);
+
+  const addLog = useCallback(
+    (level: LogLevel, category: LogCategory, message: string, data?: any) => {
+      const entry: DebugLogEntry = {
+        id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+        timestamp: new Date().toISOString(),
+        level,
+        category,
+        message,
+        data: data ? (typeof data === 'object' ? JSON.parse(JSON.stringify(data)) : data) : undefined,
+      };
+      setDebugLogs(prev => {
+        const next = [entry, ...prev].slice(0, 300);
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(next));
+          } catch {}
+        }
+        return next;
+      });
+      const prefix = `[MoneyFlow ${level}] [${category}]`;
+      if (level === 'ERROR') console.error(prefix, message, data || '');
+      else if (level === 'WARN') console.warn(prefix, message, data || '');
+      else console.log(prefix, message, data || '');
+    },
+    []
+  );
+
+  const clearLogs = useCallback(() => {
+    setDebugLogs([]);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem(LOGS_STORAGE_KEY);
+      } catch {}
+    }
+  }, []);
+
   // Modal controls
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [transactionModalInitialType, setTransactionModalInitialType] = useState<'CREDIT' | 'DEBIT' | 'TRANSFER'>('DEBIT');
@@ -167,8 +236,10 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Connect to Supabase
   const connectSupabase = useCallback(async (url: string, key: string) => {
     try {
+      addLog('INFO', 'DATABASE', `Attempting connection to Supabase endpoint: ${url}`);
       const client = createCustomSupabaseClient(url, key);
       if (!client) {
+        addLog('ERROR', 'DATABASE', 'Invalid Supabase URL or Key format');
         return {
           success: false,
           message: 'Invalid URL or Key format. URL must start with https:// and Key must be a valid Supabase anon key.',
@@ -178,11 +249,13 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const { error } = await client.from('accounts').select('id').limit(1);
       if (error) {
         if (error.code === '42P01' || error.message?.toLowerCase().includes('relation "accounts" does not exist')) {
+          addLog('WARN', 'DATABASE', 'Database reached, but SQL schema tables are missing. Please run migrations.');
           return {
             success: false,
             message: 'Database connected, but tables are missing! Please run the SQL schema migration in Supabase SQL editor first.',
           };
         }
+        addLog('ERROR', 'DATABASE', `Supabase authentication/query error: ${error.message}`);
         return { success: false, message: error.message || 'Authentication error with Supabase.' };
       }
 
@@ -204,12 +277,19 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!trRes.error && trRes.data) setTransfers(trRes.data as Transfer[]);
 
       setSyncStatus('SYNCED');
+      addLog('SUCCESS', 'DATABASE', 'Successfully connected and synchronized with Supabase database', {
+        accounts: accRes.data?.length ?? 0,
+        categories: catRes.data?.length ?? 0,
+        transactions: txRes.data?.length ?? 0,
+        transfers: trRes.data?.length ?? 0,
+      });
       return { success: true, message: 'Successfully connected and synchronized with Supabase database!' };
     } catch (err: any) {
       setSyncStatus('OFFLINE');
+      addLog('ERROR', 'DATABASE', `Connection exception: ${err.message || 'Unknown error'}`);
       return { success: false, message: err.message || 'Connection failed.' };
     }
-  }, []);
+  }, [addLog]);
 
   const disconnectSupabase = useCallback(() => {
     clearStoredSupabaseConfig();
@@ -217,7 +297,88 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setSupabaseUrl('');
     setSupabaseAnonKey('');
     setSyncStatus('LOCAL');
-  }, []);
+    addLog('INFO', 'DATABASE', 'Disconnected from cloud database. Running in Offline Local Storage mode.');
+  }, [addLog]);
+
+  // Run System Diagnostic Test
+  const runDiagnosticTest = useCallback(async () => {
+    addLog('INFO', 'SYSTEM', 'Starting system diagnostic health check...');
+
+    // 1. Client Environment Details
+    if (typeof window !== 'undefined') {
+      addLog('INFO', 'SYSTEM', 'Client Environment Specifications', {
+        userAgent: navigator.userAgent,
+        online: navigator.onLine,
+        language: navigator.language,
+        screen: `${window.screen.width}x${window.screen.height}`,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+      });
+    }
+
+    // 2. LocalStorage Read/Write Verification
+    try {
+      const testKey = '__moneyflow_rw_test__';
+      const testVal = 'diag_' + Date.now();
+      localStorage.setItem(testKey, testVal);
+      const readVal = localStorage.getItem(testKey);
+      localStorage.removeItem(testKey);
+      if (readVal === testVal) {
+        addLog('SUCCESS', 'SYSTEM', 'LocalStorage read/write check passed');
+      } else {
+        addLog('ERROR', 'SYSTEM', 'LocalStorage verification mismatch');
+      }
+    } catch (e: any) {
+      addLog('ERROR', 'SYSTEM', `LocalStorage read/write failure: ${e.message}`);
+    }
+
+    // 3. Database Ping & Counts Check
+    if (supabaseClient) {
+      addLog('INFO', 'DATABASE', `Pinging Supabase cloud endpoint: ${supabaseUrl}`);
+      const startTime = performance.now();
+      try {
+        const { error, status } = await supabaseClient
+          .from('accounts')
+          .select('id')
+          .limit(1);
+        const latency = Math.round(performance.now() - startTime);
+
+        if (error) {
+          addLog('ERROR', 'DATABASE', `Supabase ping failed (Status: ${status}): ${error.message}`, error);
+        } else {
+          addLog('SUCCESS', 'DATABASE', `Supabase database ping passed in ${latency}ms (Status: ${status})`);
+        }
+
+        const [accCount, catCount, txCount, trCount] = await Promise.all([
+          supabaseClient.from('accounts').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+          supabaseClient.from('categories').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+          supabaseClient.from('transactions').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+          supabaseClient.from('transfers').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+        ]);
+
+        addLog('INFO', 'DATABASE', 'Supabase Cloud Table Counts', {
+          accounts: accCount.count ?? 'N/A',
+          categories: catCount.count ?? 'N/A',
+          transactions: txCount.count ?? 'N/A',
+          transfers: trCount.count ?? 'N/A',
+        });
+      } catch (err: any) {
+        addLog('ERROR', 'DATABASE', `Supabase health check exception: ${err.message}`);
+      }
+    } else {
+      addLog('WARN', 'DATABASE', 'Supabase Cloud client is not configured. Running in Local Storage Mode.');
+    }
+
+    // 4. Memory State Snapshot
+    addLog('INFO', 'SYSTEM', 'Current Local State Snapshot', {
+      accountsCount: accounts.length,
+      categoriesCount: categories.length,
+      transactionsCount: transactions.length,
+      transfersCount: transfers.length,
+      syncStatus,
+    });
+
+    addLog('SUCCESS', 'SYSTEM', 'Diagnostic health check completed.');
+  }, [supabaseClient, supabaseUrl, accounts, categories, transactions, transfers, syncStatus, addLog]);
 
   // Sync and Realtime listeners when supabaseClient is active
   useEffect(() => {
@@ -739,6 +900,10 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         exportData,
         importBackup,
         resetToDefaults,
+        debugLogs,
+        addLog,
+        clearLogs,
+        runDiagnosticTest,
       }}
     >
       {children}
