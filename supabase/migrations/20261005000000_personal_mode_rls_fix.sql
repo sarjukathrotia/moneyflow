@@ -18,12 +18,17 @@ ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_from_
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_to_account_id_fkey;
 
 -- 3. ALLOW TEXT IDS (Allows friendly IDs like 'acc-cash', 'cat-food', etc.)
+ALTER TABLE IF EXISTS public.profiles ALTER COLUMN id TYPE TEXT;
 ALTER TABLE IF EXISTS public.accounts ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.accounts ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.categories ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.categories ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN account_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN category_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN from_account_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN to_account_id TYPE TEXT;
 

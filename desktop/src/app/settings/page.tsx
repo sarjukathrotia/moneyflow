@@ -47,12 +47,17 @@ ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_from_account_id_fkey;
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_to_account_id_fkey;
 
+ALTER TABLE IF EXISTS public.profiles ALTER COLUMN id TYPE TEXT;
 ALTER TABLE IF EXISTS public.accounts ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.accounts ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.categories ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.categories ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN account_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN category_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN from_account_id TYPE TEXT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN to_account_id TYPE TEXT;
 
