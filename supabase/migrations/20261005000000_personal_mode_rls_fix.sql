@@ -1,30 +1,77 @@
 -- ==============================================================================
--- MoneyFlow Database Migration: Personal Mode Access & RLS Fix
+-- MoneyFlow Database Migration: Personal Mode Access & RLS Fix (Complete)
 -- Run this in your Supabase SQL Editor to allow your personal MoneyFlow app
 -- to insert, view, update, and delete transactions without authentication errors.
 -- ==============================================================================
 
--- 1. DROP CONSTRAINTS THAT REQUIRE SUPABASE AUTH SESSIONS (auth.users)
+-- 1. DROP ALL EXISTING RLS POLICIES FIRST
+-- (PostgreSQL prevents altering column types when policies depend on them)
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN 
+        SELECT schemaname, tablename, policyname 
+        FROM pg_policies 
+        WHERE tablename IN ('profiles', 'accounts', 'categories', 'transactions', 'transfers')
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', pol.policyname, pol.schemaname, pol.tablename);
+    END LOOP;
+END $$;
+
+-- Explicitly ensure all default policies are dropped
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+
+DROP POLICY IF EXISTS "Users can view own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can insert own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can update own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can delete own accounts" ON public.accounts;
+
+DROP POLICY IF EXISTS "Users can view own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can insert own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can update own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can delete own categories" ON public.categories;
+
+DROP POLICY IF EXISTS "Users can view own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can insert own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can update own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can delete own transactions" ON public.transactions;
+
+DROP POLICY IF EXISTS "Users can view own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can insert own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can update own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can delete own transfers" ON public.transfers;
+
+-- 2. DISABLE ROW LEVEL SECURITY (RLS) FOR PERSONAL STANDALONE MODE
+ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.accounts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transfers DISABLE ROW LEVEL SECURITY;
+
+-- 3. DROP CONSTRAINTS THAT REQUIRE SUPABASE AUTH SESSIONS (auth.users)
 ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;
 ALTER TABLE IF EXISTS public.accounts DROP CONSTRAINT IF EXISTS accounts_user_id_fkey;
 ALTER TABLE IF EXISTS public.categories DROP CONSTRAINT IF EXISTS categories_user_id_fkey;
 ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_user_id_fkey;
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_user_id_fkey;
 
--- 2. DROP STRICT FOREIGN KEY & CHECK CONSTRAINTS
+-- 4. DROP STRICT FOREIGN KEY & CHECK CONSTRAINTS
 ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_account_id_fkey;
 ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_category_id_fkey;
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_from_account_id_fkey;
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_to_account_id_fkey;
 ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS chk_different_accounts;
 
--- 3. DROP DEFAULT UUID GENERATORS ON PRIMARY KEYS (prevents UUID/text conflicts)
+-- 5. DROP DEFAULT UUID GENERATORS ON PRIMARY KEYS
 ALTER TABLE IF EXISTS public.accounts ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.categories ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN id DROP DEFAULT;
 
--- 4. ALLOW TEXT IDS (Allows friendly IDs like 'acc-cash', 'cat-food', etc.)
+-- 6. CONVERT ALL ID & FOREIGN KEY COLUMNS TO TEXT
 ALTER TABLE IF EXISTS public.profiles ALTER COLUMN id TYPE TEXT USING id::text;
 
 ALTER TABLE IF EXISTS public.accounts ALTER COLUMN id TYPE TEXT USING id::text;
@@ -43,25 +90,16 @@ ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id TYPE TEXT USING user
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN from_account_id TYPE TEXT USING from_account_id::text;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN to_account_id TYPE TEXT USING to_account_id::text;
 
--- 5. RE-ADD TRANSFERS CHECK CONSTRAINT FOR TEXT TYPE
+-- 7. RE-ADD TRANSFERS CHECK CONSTRAINT FOR TEXT TYPE
 ALTER TABLE IF EXISTS public.transfers ADD CONSTRAINT chk_different_accounts CHECK (from_account_id <> to_account_id);
 
--- 6. MAKE user_id OPTIONAL
+-- 8. MAKE user_id OPTIONAL
 ALTER TABLE IF EXISTS public.accounts ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.categories ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id DROP NOT NULL;
 
--- 7. DISABLE ROW LEVEL SECURITY (RLS) FOR YOUR PERSONAL DATABASE
--- Since this is your dedicated personal Supabase project, disabling RLS allows
--- your live web app and Android app to read/write freely using your public key.
-ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.accounts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.transfers DISABLE ROW LEVEL SECURITY;
-
--- 8. ENSURE DEFAULT ACCOUNTS EXIST
+-- 9. ENSURE DEFAULT ACCOUNTS EXIST
 INSERT INTO public.accounts (id, name, type, opening_balance, icon, color)
 VALUES
   ('acc-cash', 'Cash', 'CASH', 0.00, 'Banknote', '#16A34A'),
@@ -69,7 +107,7 @@ VALUES
   ('acc-upi', 'UPI', 'UPI', 0.00, 'Smartphone', '#7C3AED')
 ON CONFLICT (id) DO NOTHING;
 
--- 9. ENSURE DEFAULT CATEGORIES EXIST
+-- 10. ENSURE DEFAULT CATEGORIES EXIST
 INSERT INTO public.categories (id, name, type, icon, color, is_default)
 VALUES
   ('cat-salary', 'Salary', 'INCOME', 'Briefcase', '#16A34A', true),

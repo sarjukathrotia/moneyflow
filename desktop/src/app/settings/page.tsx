@@ -36,6 +36,45 @@ export const dynamic = 'force-dynamic';
 const PERSONAL_MODE_SQL_FIX = `-- MoneyFlow Personal Mode & RLS Fix
 -- Run this in your Supabase SQL Editor to allow personal standalone data sync
 
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN 
+        SELECT schemaname, tablename, policyname 
+        FROM pg_policies 
+        WHERE tablename IN ('profiles', 'accounts', 'categories', 'transactions', 'transfers')
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', pol.policyname, pol.schemaname, pol.tablename);
+    END LOOP;
+END $$;
+
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can view own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can insert own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can update own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can delete own accounts" ON public.accounts;
+DROP POLICY IF EXISTS "Users can view own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can insert own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can update own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can delete own categories" ON public.categories;
+DROP POLICY IF EXISTS "Users can view own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can insert own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can update own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can delete own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can view own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can insert own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can update own transfers" ON public.transfers;
+DROP POLICY IF EXISTS "Users can delete own transfers" ON public.transfers;
+
+ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.accounts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transfers DISABLE ROW LEVEL SECURITY;
+
 ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;
 ALTER TABLE IF EXISTS public.accounts DROP CONSTRAINT IF EXISTS accounts_user_id_fkey;
 ALTER TABLE IF EXISTS public.categories DROP CONSTRAINT IF EXISTS categories_user_id_fkey;
@@ -73,12 +112,6 @@ ALTER TABLE IF EXISTS public.accounts ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.categories ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.transactions ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id DROP NOT NULL;
-
-ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.accounts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.transfers DISABLE ROW LEVEL SECURITY;
 
 INSERT INTO public.accounts (id, name, type, opening_balance, icon, color)
 VALUES
