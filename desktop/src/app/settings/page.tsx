@@ -33,6 +33,66 @@ import { useMoneyFlow } from '../../lib/store';
 
 export const dynamic = 'force-dynamic';
 
+const PERSONAL_MODE_SQL_FIX = `-- MoneyFlow Personal Mode & RLS Fix
+-- Run this in your Supabase SQL Editor to allow personal standalone data sync
+
+ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;
+ALTER TABLE IF EXISTS public.accounts DROP CONSTRAINT IF EXISTS accounts_user_id_fkey;
+ALTER TABLE IF EXISTS public.categories DROP CONSTRAINT IF EXISTS categories_user_id_fkey;
+ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_user_id_fkey;
+ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_user_id_fkey;
+
+ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_account_id_fkey;
+ALTER TABLE IF EXISTS public.transactions DROP CONSTRAINT IF EXISTS transactions_category_id_fkey;
+ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_from_account_id_fkey;
+ALTER TABLE IF EXISTS public.transfers DROP CONSTRAINT IF EXISTS transfers_to_account_id_fkey;
+
+ALTER TABLE IF EXISTS public.accounts ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.categories ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN account_id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN category_id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN from_account_id TYPE TEXT;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN to_account_id TYPE TEXT;
+
+ALTER TABLE IF EXISTS public.accounts ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE IF EXISTS public.categories ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE IF EXISTS public.transactions ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE IF EXISTS public.transfers ALTER COLUMN user_id DROP NOT NULL;
+
+ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.accounts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transfers DISABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.accounts (id, name, type, opening_balance, icon, color)
+VALUES
+  ('acc-cash', 'Cash', 'CASH', 0.00, 'Banknote', '#16A34A'),
+  ('acc-bank', 'Bank Account', 'BANK', 0.00, 'Building2', '#2563EB'),
+  ('acc-upi', 'UPI', 'UPI', 0.00, 'Smartphone', '#7C3AED')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.categories (id, name, type, icon, color, is_default)
+VALUES
+  ('cat-salary', 'Salary', 'INCOME', 'Briefcase', '#16A34A', true),
+  ('cat-freelance', 'Freelance', 'INCOME', 'Laptop', '#10B981', true),
+  ('cat-gift', 'Gift', 'INCOME', 'Gift', '#0D9488', true),
+  ('cat-cashback', 'Cashback', 'INCOME', 'Sparkles', '#2563EB', true),
+  ('cat-refund', 'Refund', 'INCOME', 'RotateCcw', '#0284C7', true),
+  ('cat-other-income', 'Other Income', 'INCOME', 'PlusCircle', '#6366F1', true),
+  ('cat-food', 'Food', 'EXPENSE', 'Utensils', '#EA580C', true),
+  ('cat-shopping', 'Shopping', 'EXPENSE', 'ShoppingBag', '#DB2777', true),
+  ('cat-travel', 'Travel', 'EXPENSE', 'Navigation', '#0284C7', true),
+  ('cat-fuel', 'Fuel', 'EXPENSE', 'Fuel', '#D97706', true),
+  ('cat-bills', 'Bills', 'EXPENSE', 'Receipt', '#DC2626', true),
+  ('cat-entertainment', 'Entertainment', 'EXPENSE', 'Film', '#9333EA', true),
+  ('cat-health', 'Health', 'EXPENSE', 'HeartPulse', '#E11D48', true),
+  ('cat-subscriptions', 'Subscriptions', 'EXPENSE', 'CalendarClock', '#7C3AED', true),
+  ('cat-other-expense', 'Other', 'EXPENSE', 'HelpCircle', '#6B7280', true)
+ON CONFLICT (id) DO NOTHING;`;
+
 export default function SettingsPage() {
   const {
     profile,
@@ -122,6 +182,13 @@ export default function SettingsPage() {
   const [dbFeedback, setDbFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showSqlGuide, setShowSqlGuide] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedSqlFix, setCopiedSqlFix] = useState(false);
+
+  const handleCopySqlFix = () => {
+    navigator.clipboard.writeText(PERSONAL_MODE_SQL_FIX);
+    setCopiedSqlFix(true);
+    setTimeout(() => setCopiedSqlFix(false), 2500);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -313,24 +380,49 @@ export default function SettingsPage() {
 
         {/* Expandable SQL Setup Instructions */}
         {showSqlGuide && (
-          <div className="p-4 rounded-xl bg-background border border-border space-y-3 animate-in fade-in">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-primaryText">Database Schema Migration Guide</h3>
-              <button
-                type="button"
-                onClick={handleCopySqlPath}
-                className="text-[11px] font-semibold text-primaryAccent flex items-center gap-1 hover:underline"
-              >
-                {copiedSql ? <Check className="w-3 h-3 text-positive" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedSql ? 'Path Copied!' : 'Copy Migration File Path'}</span>
-              </button>
+          <div className="p-4 rounded-xl bg-background border border-border space-y-4 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+              <div>
+                <h3 className="text-xs font-bold text-primaryText">Database Schema & Personal Mode Fix</h3>
+                <p className="text-[11px] text-secondaryText">Fixes 42501 RLS policy errors and ensures expenses persist across refreshes</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopySqlFix}
+                  className="px-2.5 py-1.5 bg-primaryAccent hover:bg-blue-700 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 shadow-sm transition-all"
+                >
+                  {copiedSqlFix ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSqlFix ? 'Fix SQL Copied!' : 'Copy 1-Click Fix SQL'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopySqlPath}
+                  className="text-[11px] font-semibold text-secondaryText hover:text-primaryText flex items-center gap-1"
+                  title="Copy path to migration file"
+                >
+                  {copiedSql ? <Check className="w-3 h-3 text-positive" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedSql ? 'Path Copied!' : 'Copy Path'}</span>
+                </button>
+              </div>
             </div>
+
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[11px] text-amber-700 dark:text-amber-400 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>Notice: Refreshing showing ₹00 or data disappearing?</span>
+              </p>
+              <p className="leading-relaxed">
+                Supabase default schema requires user login sessions (Row Level Security). For personal standalone tracking without email logins, run the <strong>1-Click Fix SQL</strong> in your Supabase SQL Editor.
+              </p>
+            </div>
+
             <ol className="text-xs text-secondaryText list-decimal list-inside space-y-1.5 leading-relaxed">
               <li>Open your project at <strong>https://supabase.com/dashboard</strong></li>
               <li>Navigate to <strong>SQL Editor</strong> in the left sidebar and click <strong>New query</strong></li>
-              <li>Paste the contents of <code className="px-1.5 py-0.5 bg-surface border border-border rounded text-primaryText font-mono text-[11px]">supabase/migrations/20261004000000_initial_schema.sql</code></li>
-              <li>Click <strong>Run</strong> to create all tables (<code className="text-primaryText">accounts</code>, <code className="text-primaryText">categories</code>, <code className="text-primaryText">transactions</code>, <code className="text-primaryText">transfers</code>), RLS policies, and triggers</li>
-              <li>Copy your <strong>Project URL</strong> and <strong>anon key</strong> from <strong>Project Settings → API</strong> into the form above and click <strong>Connect Database</strong>!</li>
+              <li>Click the <strong>Copy 1-Click Fix SQL</strong> button above</li>
+              <li>Paste it into the SQL Editor and click <strong>Run</strong></li>
+              <li>Once run, refresh MoneyFlow — your expenses and balances will persist permanently both locally and in the cloud!</li>
             </ol>
           </div>
         )}

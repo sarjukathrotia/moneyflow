@@ -151,16 +151,47 @@ const defaultTransactions: Transaction[] = [];
 
 const defaultTransfers: Transfer[] = [];
 
+const getInitialState = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          profile: parsed.profile || defaultProfile,
+          accounts: parsed.accounts && parsed.accounts.length > 0 ? parsed.accounts : defaultAccounts,
+          categories: parsed.categories && parsed.categories.length > 0 ? parsed.categories : defaultCategories,
+          transactions: parsed.transactions || defaultTransactions,
+          transfers: parsed.transfers || defaultTransfers,
+        };
+      }
+    } catch {}
+  }
+  return {
+    profile: defaultProfile,
+    accounts: defaultAccounts,
+    categories: defaultCategories,
+    transactions: defaultTransactions,
+    transfers: defaultTransfers,
+  };
+};
+
 const MoneyFlowContext = createContext<MoneyFlowContextType | null>(null);
 
 export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [profile, setProfile] = useState<Profile>(defaultProfile);
-  const [accounts, setAccounts] = useState<Account[]>(defaultAccounts);
-  const [categories, setCategories] = useState<Category[]>(defaultCategories);
-  const [transactions, setTransactions] = useState<Transaction[]>(defaultTransactions);
-  const [transfers, setTransfers] = useState<Transfer[]>(defaultTransfers);
+  const [profile, setProfile] = useState<Profile>(() => getInitialState().profile);
+  const [accounts, setAccounts] = useState<Account[]>(() => getInitialState().accounts);
+  const [categories, setCategories] = useState<Category[]>(() => getInitialState().categories);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => getInitialState().transactions);
+  const [transfers, setTransfers] = useState<Transfer[]>(() => getInitialState().transfers);
   const [syncStatus, setSyncStatus] = useState<'SYNCED' | 'SYNCING' | 'OFFLINE' | 'LOCAL'>('LOCAL');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+
+  const isHydratedRef = React.useRef(false);
+
+  useEffect(() => {
+    isHydratedRef.current = true;
+  }, []);
 
   // Supabase Dynamic Client & Config State
   const [supabaseClient, setSupabaseClient] = useState(() => getActiveSupabaseClient().client);
@@ -214,24 +245,6 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [isQuickSpendOpen, setIsQuickSpendOpen] = useState(false);
   const [deleteItem, setDeleteItem] = useState<{ id: string; type: 'transaction' | 'transfer' | 'account'; title: string } | null>(null);
-
-  // Initialize from LocalStorage
-  useEffect(() => {
-    try {
-      localStorage.removeItem('moneyflow_state_v1');
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.profile) setProfile(parsed.profile);
-        if (parsed.accounts) setAccounts(parsed.accounts);
-        if (parsed.categories) setCategories(parsed.categories);
-        if (parsed.transactions) setTransactions(parsed.transactions);
-        if (parsed.transfers) setTransfers(parsed.transfers);
-      }
-    } catch {
-      // Ignore storage read errors
-    }
-  }, []);
 
   // Connect to Supabase
   const connectSupabase = useCallback(async (url: string, key: string) => {
@@ -396,11 +409,32 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     ]).then(([accRes, catRes, txRes, trRes]) => {
       if (!accRes.error && accRes.data && accRes.data.length > 0) setAccounts(accRes.data as Account[]);
       if (!catRes.error && catRes.data && catRes.data.length > 0) setCategories(catRes.data as Category[]);
-      if (!txRes.error && txRes.data) setTransactions(txRes.data as Transaction[]);
-      if (!trRes.error && trRes.data) setTransfers(trRes.data as Transfer[]);
+      if (!txRes.error && txRes.data) {
+        if (txRes.data.length > 0) {
+          setTransactions(txRes.data as Transaction[]);
+          addLog('INFO', 'SYNC', `Loaded ${txRes.data.length} transactions from Supabase database`);
+        } else {
+          // Supabase is empty, sync local transactions up if any exist
+          setTransactions(localTxs => {
+            if (localTxs.length > 0) {
+              addLog('INFO', 'SYNC', `Syncing ${localTxs.length} local transactions to cloud...`);
+              supabaseClient.from('transactions').insert(localTxs).then(({ error }) => {
+                if (error) {
+                  addLog('WARN', 'DATABASE', `Cloud sync pending: ${error.message} (Code: ${error.code})`);
+                } else {
+                  addLog('SUCCESS', 'DATABASE', `Synchronized ${localTxs.length} transactions to Supabase!`);
+                }
+              });
+            }
+            return localTxs;
+          });
+        }
+      }
+      if (!trRes.error && trRes.data && trRes.data.length > 0) setTransfers(trRes.data as Transfer[]);
       setSyncStatus('SYNCED');
-    }).catch(() => {
-      setSyncStatus('OFFLINE');
+    }).catch((err: any) => {
+      setSyncStatus('LOCAL');
+      addLog('WARN', 'SYNC', `Supabase query notice: ${err?.message || 'Offline mode'}`);
     });
 
     const channel = supabaseClient
@@ -422,10 +456,11 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       supabaseClient.removeChannel(channel);
     };
-  }, [supabaseClient]);
+  }, [supabaseClient, addLog]);
 
-  // Save to localStorage when state changes
+  // Save to localStorage when state changes (guarded against unhydrated initial renders)
   useEffect(() => {
+    if (!isHydratedRef.current) return;
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -499,16 +534,26 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (supabaseClient) {
         setSyncStatus('SYNCING');
         try {
-          await supabaseClient.from('transactions').insert([newTx]);
-          setSyncStatus('SYNCED');
-        } catch {
-          setSyncStatus('OFFLINE');
+          const { error } = await supabaseClient.from('transactions').insert([newTx]);
+          if (error) {
+            console.error('Supabase insert error:', error);
+            addLog('ERROR', 'DATABASE', `Supabase insert rejected: ${error.message} (Code: ${error.code})`, error);
+            setSyncStatus('LOCAL');
+          } else {
+            setSyncStatus('SYNCED');
+            addLog('SUCCESS', 'TRANSACTION', `Recorded ${newTx.type}: ₹${newTx.amount} synced to cloud`);
+          }
+        } catch (err: any) {
+          setSyncStatus('LOCAL');
+          addLog('ERROR', 'DATABASE', `Network exception while saving: ${err.message}`);
         }
+      } else {
+        addLog('SUCCESS', 'TRANSACTION', `Recorded ${newTx.type}: ₹${newTx.amount} saved locally`);
       }
 
       return id;
     },
-    [profile.id]
+    [profile.id, supabaseClient, addLog]
   );
 
   // Update Transaction
@@ -522,17 +567,22 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (supabaseClient) {
         setSyncStatus('SYNCING');
         try {
-          await supabaseClient
+          const { error } = await supabaseClient
             .from('transactions')
             .update({ ...updates, updated_at: now })
             .eq('id', id);
-          setSyncStatus('SYNCED');
+          if (error) {
+            addLog('ERROR', 'DATABASE', `Supabase update rejected: ${error.message}`);
+            setSyncStatus('LOCAL');
+          } else {
+            setSyncStatus('SYNCED');
+          }
         } catch {
-          setSyncStatus('OFFLINE');
+          setSyncStatus('LOCAL');
         }
       }
     },
-    []
+    [supabaseClient, addLog]
   );
 
   // Soft Delete Transaction
@@ -546,17 +596,22 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (supabaseClient) {
         setSyncStatus('SYNCING');
         try {
-          await supabaseClient
+          const { error } = await supabaseClient
             .from('transactions')
             .update({ deleted_at: now, updated_at: now })
             .eq('id', id);
-          setSyncStatus('SYNCED');
+          if (error) {
+            addLog('ERROR', 'DATABASE', `Supabase delete rejected: ${error.message}`);
+            setSyncStatus('LOCAL');
+          } else {
+            setSyncStatus('SYNCED');
+          }
         } catch {
-          setSyncStatus('OFFLINE');
+          setSyncStatus('LOCAL');
         }
       }
     },
-    []
+    [supabaseClient, addLog]
   );
 
   // Add Transfer
@@ -578,16 +633,24 @@ export const MoneyFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (supabaseClient) {
         setSyncStatus('SYNCING');
         try {
-          await supabaseClient.from('transfers').insert([newTr]);
-          setSyncStatus('SYNCED');
+          const { error } = await supabaseClient.from('transfers').insert([newTr]);
+          if (error) {
+            addLog('ERROR', 'DATABASE', `Supabase transfer insert rejected: ${error.message}`);
+            setSyncStatus('LOCAL');
+          } else {
+            setSyncStatus('SYNCED');
+            addLog('SUCCESS', 'TRANSACTION', `Transferred ₹${newTr.amount} synced to cloud`);
+          }
         } catch {
-          setSyncStatus('OFFLINE');
+          setSyncStatus('LOCAL');
         }
+      } else {
+        addLog('SUCCESS', 'TRANSACTION', `Transferred ₹${newTr.amount} saved locally`);
       }
 
       return id;
     },
-    [profile.id]
+    [profile.id, supabaseClient, addLog]
   );
 
   // Soft Delete Transfer
